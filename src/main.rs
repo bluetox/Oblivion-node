@@ -83,7 +83,7 @@ struct Output {
     valid: bool,
     hashedPublicKey: String,
 }
-use tokio::sync::mpsc;
+
 fn check_ts_validity(ts: &str) -> bool {
     let ts = ts.parse::<u64>().unwrap_or(0) / 1000;
     let now = Utc::now().timestamp() as u64;
@@ -188,7 +188,7 @@ async fn handle_connect(
         if !check_ts_validity(&input.data.ts) {
             let response = Output { valid: false, hashedPublicKey: String::new() };
             let mut stream = writer.lock().await;
-            let _ = stream.write_all(serde_json::to_string(&response).unwrap().as_bytes()).await;
+            let _ = stream.write_all(format!("{}\n", serde_json::to_string(&response).unwrap()).as_bytes()).await;
             return;
         }
         println!("In connect");
@@ -212,7 +212,7 @@ async fn handle_connect(
                 println!("Duplicate request detected");
                 let response = Output { valid: false, hashedPublicKey: public_id.clone() };
                 let mut stream = writer.lock().await;
-                let _ = stream.write_all(serde_json::to_string(&response).unwrap().as_bytes()).await;
+                let _ = stream.write_all(format!("{}\n", serde_json::to_string(&response).unwrap()).as_bytes()).await;
                 return;
             }
             hashes.insert(unique_request_hash);
@@ -228,7 +228,7 @@ async fn handle_connect(
         {
             let response = Output { valid: is_valid, hashedPublicKey: public_id.clone() };
             let mut stream = writer.lock().await;
-            let _ = stream.write_all(serde_json::to_string(&response).unwrap().as_bytes()).await;
+            let _ = stream.write_all(format!("{}\n", serde_json::to_string(&response).unwrap()).as_bytes()).await;
         }
         if is_valid {
             broadcast_conn(&input).await;
@@ -263,7 +263,7 @@ async fn forward(
 
         if let Some(stream) = connection {
             let mut locked_writer = stream.lock().await;
-            if let Err(e) = locked_writer.write_all(received.as_bytes()).await {
+            if let Err(e) = locked_writer.write_all(format!("{}\n", received).as_bytes()).await {
                 println!("[ERROR] Failed to write to socket: {}", e);
             } else {
                 println!("Message successfully sent to {}", input.data.dst);
@@ -303,7 +303,7 @@ async fn forward(
 
         if let Some(stream) = connection {
             let mut locked_writer = stream.lock().await;
-            if let Err(e) = locked_writer.write_all(received.as_bytes()).await {
+            if let Err(e) = locked_writer.write_all(format!("{}\n", received).as_bytes()).await {
                 println!("[ERROR] Failed to write to socket: {}", e);
             } else {
                 println!("Message successfully sent to {}", input.data.dst);
@@ -343,7 +343,7 @@ async fn forward(
 
         if let Some(stream) = connection {
             let mut locked_writer = stream.lock().await;
-            if let Err(e) = locked_writer.write_all(received.as_bytes()).await {
+            if let Err(e) = locked_writer.write_all(format!("{}\n", received).as_bytes()).await {
                 println!("[ERROR] Failed to write to socket: {}", e);
             } else {
                 println!("Message successfully sent to {}", input.data.dst);
@@ -392,8 +392,6 @@ async fn handle_broadcast(received: String, nodes_conns: Arc<Mutex<HashMap<Strin
         eprintln!("Failed to parse received data as Input. ");
     }
 }
-
-
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind("0.0.0.0:8081").await?;
@@ -402,7 +400,7 @@ async fn main() -> std::io::Result<()> {
         let (socket, _addr) = listener.accept().await?;
         let request_hashes = REQUEST_HASHES.clone();
         let nodes_conns_clone = Arc::clone(&nodes_conns);
-        let (mut read_half, mut write_half) = socket.into_split();
+        let (mut read_half, write_half) = socket.into_split();
         let writer = Arc::new(Mutex::new(write_half));
         println!("New connection established");
 
@@ -428,15 +426,15 @@ async fn main() -> std::io::Result<()> {
                                     handle_broadcast(received, Arc::clone(&nodes_conns_clone)).await;
                                 }
                             }
-                            else if let Ok(input) = serde_json::from_str::<AppendKyberKey>(&received) {
+                            else if let Ok(_input) = serde_json::from_str::<AppendKyberKey>(&received) {
                                 println!("Forwarding KyberKey");
                                 forward(received, Arc::clone(&nodes_conns_clone)).await;
                             }
-                            else if let Ok(input) = serde_json::from_str::<AppendCypherText>(&received) {
+                            else if let Ok(_input) = serde_json::from_str::<AppendCypherText>(&received) {
                                 println!("Forwarding CypherText");
                                 forward(received, Arc::clone(&nodes_conns_clone)).await;
                             }
-                            else if let Ok(input) = serde_json::from_str::<ForwardMessage>(&received) {
+                            else if let Ok(_input) = serde_json::from_str::<ForwardMessage>(&received) {
                                 println!("Forwarding Message");
                                 forward(received, Arc::clone(&nodes_conns_clone)).await;
                             }
