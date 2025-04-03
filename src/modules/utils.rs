@@ -63,7 +63,7 @@ pub fn _ip_to_bytes(ip: IpAddr) -> Vec<u8> {
     }
 }
 
-pub async fn _save_packet(hash: String, packet: Vec<u8>) {
+pub async fn save_packet(hash: String, packet: Vec<u8>) {
     println!("Saved packet");
     let mut store = super::super::DELAYED_DELIVERY.lock().await;
 

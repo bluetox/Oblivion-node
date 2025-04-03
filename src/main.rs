@@ -28,6 +28,7 @@ lazy_static::lazy_static! {
 lazy_static::lazy_static! {
     pub static ref NODES_HASHMAP: Arc<Mutex<Vec<modules::node_assign::IpHash>>> = Arc::new(Mutex::new(Vec::new()));
 }
+
 lazy_static::lazy_static! {
     static ref PUBLIC_IP: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 }
@@ -60,12 +61,21 @@ async fn get_pub_ip() -> String {
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let _ = get_pub_ip().await;
+
     let file = OpenOptions::new()
     .read(true)
     .write(true)
     .create(true)
     .open("sorted_hashes.txt")?;
 
+    let conn = rusqlite::Connection::open("node.db").unwrap();
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS secrets (
+            ip TEXT NOT NULL,
+            shared_secret BLOB NOT NULL
+        )",
+        [],
+    ).unwrap();
     modules::node_assign::read_and_sort_hashes_from_file(&file).await.unwrap();
     let listener = match TcpListener::bind("0.0.0.0:8081").await {
         Ok(l) => l,
@@ -112,6 +122,7 @@ async fn handle_client(
                     buffer.clear();
                     continue;
                 }
+
                 let prefix = &buffer[0..3];
                 let payload_size_bytes = &buffer[1..3];
                 let payload_size = u16::from_le_bytes([payload_size_bytes[0], payload_size_bytes[1]]) as usize;
@@ -132,9 +143,10 @@ async fn handle_client(
                     0 => {
                         let public_kk = &buffer[5 .. 5 + 1568];
                         let mut enc_rng =   rand::rngs::OsRng;
-                        let (ct,ss) = pqc_kyber::encapsulate(public_kk, &mut enc_rng).unwrap();
+                        let (ct,ss) = safe_pqc_kyber::encapsulate(public_kk, &mut enc_rng).unwrap();
                         {
                             shared_secret = ss;
+                            println!("shared secret: {:?}", shared_secret);
                             let mut message = BytesMut::with_capacity(1573);
                             message.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00]);
                             message.extend_from_slice(&ct);

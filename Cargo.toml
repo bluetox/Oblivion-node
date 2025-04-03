@@ -15,6 +15,7 @@ chrono = "0.4"
 flate2 = "1.0"
 bytes = "1.0"
 ed25519-dalek = "1.0"
-pqc_kyber = {version = "0.7.1", features = ["kyber1024"] }
 rand = "0.8"
 aes-gcm = "0.10.0"
+safe_pqc_kyber = { path = "./argyle-kyber", features = ["kyber1024", "zeroize"]}
+rusqlite = { version = "0.34.0", features = ["bundled"] }

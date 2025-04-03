@@ -17,7 +17,14 @@ pub async fn forward(
     encrypted_packet: &BytesMut,
     shared_secret: &[u8]
 ) {
-    let decypted_packet=  super::utils::decrypt_packet(encrypted_packet, shared_secret).await.unwrap();
+    let mut decypted_packet : Vec<u8>;
+    if (encrypted_packet[3] & (1 << 7)) != 0 {
+        decypted_packet = encrypted_packet.to_vec();
+    }
+    else {
+        decypted_packet = super::utils::decrypt_packet(encrypted_packet, shared_secret).await.unwrap().to_vec();
+    }
+    
     let payload_size_bytes = &decypted_packet[1..3];
     let payload_size = u16::from_le_bytes([payload_size_bytes[0], payload_size_bytes[1]]) as usize;
 
@@ -69,8 +76,13 @@ pub async fn forward(
     }
     else {
         println!("No connection for {}", user_id_hex);
-        for raw_ip in super::node_assign::find_closest_hashes(&hex::decode(user_id_hex).unwrap(), 4).await {
+        for raw_ip in super::node_assign::find_closest_hashes(&hex::decode(&user_id_hex).unwrap(), 4).await {
+            if raw_ip == "192.168.1.51".to_string() {
+                utils::save_packet(user_id_hex, decypted_packet).await;
+                return
+            }
             let ip: std::net::IpAddr = raw_ip.parse().expect("Invalid IP address");
+            decypted_packet[3] |= 1 << 7;
             match utils::send_tcp_message(&ip, &decypted_packet).await {
                 Ok(()) => {
                     println!("node is online");
@@ -79,19 +91,7 @@ pub async fn forward(
                 Err(_) => println!("node is offline"),
             }
         }
-        /*
-        match utils::find_closest_nodes(user_id_bytes).await {
-            Ok((primary_node_ip, _)) =>{
-                let ip: IpAddr = primary_node_ip.parse().expect("Invalid IP address");
-                if ip!= IpAddr::V4(std::net::Ipv4Addr::new(0,0,0,0)) {
-                    let _ = utils::send_tcp_message(&ip, &decypted_packet, user_id_hex).await;
-                }
-            }
-            _ => {
-                println!("Error while finding closest nodes");
-            }
-        }
-        */
+        
     }
 }
 
