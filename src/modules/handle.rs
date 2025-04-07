@@ -11,20 +11,13 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use hex;
 use pqc_dilithium::verify;
-use ed25519_dalek::{PublicKey, Signature, Verifier};
+use ed25519_dalek::{VerifyingKey, Signature, Verifier};
 
 pub async fn forward(
     encrypted_packet: &BytesMut,
     shared_secret: &[u8]
 ) {
-    let mut decypted_packet : Vec<u8>;
-    if (encrypted_packet[3] & (1 << 7)) != 0 {
-        decypted_packet = encrypted_packet.to_vec();
-    }
-    else {
-        decypted_packet = super::utils::decrypt_packet(encrypted_packet, shared_secret).await.unwrap().to_vec();
-    }
-    
+    let decypted_packet=  super::utils::decrypt_packet(encrypted_packet, shared_secret).await.unwrap();
     let payload_size_bytes = &decypted_packet[1..3];
     let payload_size = u16::from_le_bytes([payload_size_bytes[0], payload_size_bytes[1]]) as usize;
 
@@ -51,9 +44,17 @@ pub async fn forward(
         return;
     }
     
-    match PublicKey::from_bytes(ed25519_public_key) {
+    let ed_public_key_array: &[u8; 32] = ed25519_public_key
+        .try_into()
+        .expect("Public key must be exactly 32 bytes");
+
+    let ed_signature_array: &[u8; 64] = ed25519_signature
+        .try_into()
+        .expect("Signature must be exactly 64 bytes");
+
+    match VerifyingKey::from_bytes(ed_public_key_array) {
         Ok(public_key) => {
-            let signature = Signature::from_bytes(ed25519_signature).unwrap();
+            let signature = Signature::from_bytes(ed_signature_array);
             match public_key.verify(data_to_sign_bytes, &signature) {
                 Ok(_) => println!("✅ Ed25519 Signature is valid!"),
                 Err(_) => return,
@@ -61,7 +62,6 @@ pub async fn forward(
         },
         Err(_) => return,
     }
-
     let connection = {
         let connections = CONNECTIONS.read().await;
         connections.get(&user_id_hex).cloned()
@@ -76,13 +76,8 @@ pub async fn forward(
     }
     else {
         println!("No connection for {}", user_id_hex);
-        for raw_ip in super::node_assign::find_closest_hashes(&hex::decode(&user_id_hex).unwrap(), 4).await {
-            if raw_ip == "192.168.1.51".to_string() {
-                utils::save_packet(user_id_hex, decypted_packet).await;
-                return
-            }
+        for raw_ip in super::node_assign::find_closest_hashes(&hex::decode(user_id_hex).unwrap(), 4).await {
             let ip: std::net::IpAddr = raw_ip.parse().expect("Invalid IP address");
-            decypted_packet[3] |= 1 << 7;
             match utils::send_tcp_message(&ip, &decypted_packet).await {
                 Ok(()) => {
                     println!("node is online");
@@ -91,7 +86,6 @@ pub async fn forward(
                 Err(_) => println!("node is offline"),
             }
         }
-        
     }
 }
 
@@ -114,9 +108,17 @@ pub async fn handle_connect(
     let timestamp_bytes = &decypted_packet[5 + 3293 + 64 + 1952 + 32 + 16 .. 5 + 3293 + 64 + 1952 + 32 + 16 + 8];
     let timestamp = utils::uint8_array_to_ts(&timestamp_bytes);
 
-    match PublicKey::from_bytes(ed25519_public_key) {
+    let ed_public_key_array: &[u8; 32] = ed25519_public_key
+        .try_into()
+        .expect("Public key must be exactly 32 bytes");
+
+    let ed_signature_array: &[u8; 64] = ed25519_signature
+        .try_into()
+        .expect("Signature must be exactly 64 bytes");
+
+    match VerifyingKey::from_bytes(ed_public_key_array) {
         Ok(public_key) => {
-            let signature = Signature::from_bytes(ed25519_signature).unwrap();
+            let signature = Signature::from_bytes(ed_signature_array);
             match public_key.verify(data_to_sign_bytes, &signature) {
                 Ok(_) => println!("✅ Ed25519 Signature is valid!"),
                 Err(_) => return,
@@ -183,10 +185,17 @@ pub async fn handle_node_assignement(
     let timestamp_bytes = &buffer[5 + 3293 + 64 + 1952 + 32 + 16 .. 5 + 3293 + 64 + 1952 + 32 + 16 + 8];
     let timestamp = utils::uint8_array_to_ts(&timestamp_bytes);
 
-    
-    match PublicKey::from_bytes(ed25519_public_key) {
+    let ed_public_key_array: &[u8; 32] = ed25519_public_key
+        .try_into()
+        .expect("Public key must be exactly 32 bytes");
+
+    let ed_signature_array: &[u8; 64] = ed25519_signature
+        .try_into()
+        .expect("Signature must be exactly 64 bytes");
+
+    match VerifyingKey::from_bytes(ed_public_key_array) {
         Ok(public_key) => {
-            let signature = Signature::from_bytes(ed25519_signature).unwrap();
+            let signature = Signature::from_bytes(ed_signature_array);
             match public_key.verify(data_to_sign_bytes, &signature) {
                 Ok(_) => println!("✅ Ed25519 Signature is valid!"),
                 Err(_) => return,
