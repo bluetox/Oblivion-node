@@ -1,3 +1,5 @@
+use crate::modules::utils::save_packet;
+
 use super::crypto;
 use super::utils;
 use super::super::CONNECTIONS;
@@ -76,14 +78,19 @@ pub async fn forward(
     }
     else {
         println!("No connection for {}", user_id_hex);
-        for raw_ip in super::node_assign::find_closest_hashes(&hex::decode(user_id_hex).unwrap(), 4).await {
+        for raw_ip in super::node_assign::find_closest_hashes(&hex::decode(&user_id_hex).unwrap(), 4).await {
             let ip: std::net::IpAddr = raw_ip.parse().expect("Invalid IP address");
+            if raw_ip == super::super::PUBLIC_IP.lock().unwrap().to_string() {
+                save_packet(user_id_hex.clone(), decypted_packet.to_vec()).await;
+            }
             match utils::send_tcp_message(&ip, &decypted_packet).await {
                 Ok(()) => {
                     println!("node is online");
                     break;
                 }
-                Err(_) => println!("node is offline"),
+                Err(_) => {
+                    println!("node is offline")
+                },
             }
         }
     }

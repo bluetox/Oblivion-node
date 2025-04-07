@@ -30,7 +30,7 @@ lazy_static::lazy_static! {
 }
 
 lazy_static::lazy_static! {
-    static ref PUBLIC_IP: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+    pub static ref PUBLIC_IP: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 }
 
 async fn get_pub_ip() -> String {
