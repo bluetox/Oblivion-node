@@ -14,7 +14,7 @@ lazy_static = "1.4"
 chrono = "0.4"
 flate2 = "1.0"
 bytes = "1.0"
-ed25519-dalek = "1.0"
+ed25519-dalek = "2.1.1"
 rand = "0.8"
 aes-gcm = "0.10.0"
 safe_pqc_kyber = { path = "./kyber", features = ["kyber1024", "zeroize"]}
