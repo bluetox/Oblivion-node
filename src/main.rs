@@ -77,7 +77,7 @@ async fn main() -> std::io::Result<()> {
         [],
     ).unwrap();
     modules::node_assign::read_and_sort_hashes_from_file(&file).await.unwrap();
-    let listener = match TcpListener::bind("0.0.0.0:20168").await {
+    let listener = match TcpListener::bind("0.0.0.0:32775").await {
         Ok(l) => l,
         Err(e) => {
             eprintln!("Failed to bind to port: {}", e);
