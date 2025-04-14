@@ -17,7 +17,7 @@ pub fn check_ts_validity(ts: u64) -> bool {
 }
 
 pub async fn send_tcp_message(ip: &IpAddr, buffer: &[u8]) -> Result<(), Box<dyn Error>> {
-    let addr: SocketAddr = SocketAddr::new(*ip, 8081);
+    let addr: SocketAddr = SocketAddr::new(*ip, 20168);
 
     match tokio::time::timeout(Duration::from_secs(3), TcpStream::connect(&addr)).await {
         Ok(Ok(mut stream)) => {

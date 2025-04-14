@@ -17,6 +17,7 @@ pub async fn forward(
     encrypted_packet: &BytesMut,
     shared_secret: &[u8]
 ) {
+    println!("received forward");
     let mut decypted_packet : Vec<u8>;
     if (encrypted_packet[3] & (1 << 7)) != 0 {
         decypted_packet = encrypted_packet.to_vec();
@@ -64,6 +65,7 @@ pub async fn forward(
 
     let connection = {
         let connections = CONNECTIONS.read().await;
+        println!("{:?}", &connections);
         connections.get(&user_id_hex).cloned()
     };
     if let Some(stream) = connection {

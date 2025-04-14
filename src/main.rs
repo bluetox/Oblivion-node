@@ -77,7 +77,7 @@ async fn main() -> std::io::Result<()> {
         [],
     ).unwrap();
     modules::node_assign::read_and_sort_hashes_from_file(&file).await.unwrap();
-    let listener = match TcpListener::bind("0.0.0.0:8081").await {
+    let listener = match TcpListener::bind("0.0.0.0:20168").await {
         Ok(l) => l,
         Err(e) => {
             eprintln!("Failed to bind to port: {}", e);
@@ -107,7 +107,16 @@ async fn handle_client(
     let mut shared_secret: [u8; 32] = [0; 32];
     loop {
         match read_half.read_buf(&mut buffer).await {
-            Ok(0) => break,
+            Ok(0) => {
+                if user_id.len() > 0 {
+                    let mut connections = CONNECTIONS.write().await;
+                    connections.remove(&user_id);
+                    println!("{:?}", connections)
+                }
+                println!("a connection was cleanely aborted");
+                
+                break
+            },
             Ok(n) => {
                 if n == 0 {
                     if user_id.len() > 0 {
