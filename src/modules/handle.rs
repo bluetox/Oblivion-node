@@ -92,6 +92,7 @@ pub async fn forward(
             if raw_ip == super::super::PUBLIC_IP.lock().unwrap().to_string() {
                 save_packet(user_id_hex.clone(), decypted_packet.to_vec()).await;
             }
+            decypted_packet[3] |= 1 << 7;
             match utils::send_tcp_message(&ip, &decypted_packet).await {
                 Ok(()) => {
                     println!("node is online");
