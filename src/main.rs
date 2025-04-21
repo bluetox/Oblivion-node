@@ -109,23 +109,20 @@ async fn handle_client(
         match read_half.read_buf(&mut buffer).await {
             Ok(0) => {
                 if user_id.len() > 0 {
-                    let mut connections = CONNECTIONS.write().await;
-                    connections.remove(&user_id);
-                    println!("{:?}", connections)
+                    let connections = CONNECTIONS.write().await;
+                    if let Some(existing_arc) = connections.get(&user_id) {
+                        if Arc::ptr_eq(existing_arc, &writer) {
+                            println!("DUPE request");
+                        }
+                    }
+                break;
                 }
+
                 println!("a connection was cleanely aborted");
-                
                 break
             },
+
             Ok(n) => {
-                if n == 0 {
-                    if user_id.len() > 0 {
-                        let mut connections = CONNECTIONS.write().await;
-                        connections.remove(&user_id);
-                        println!("{:?}", connections)
-                    }
-                    break;
-                }
                 if n < 3 {
                     println!("[ERROR] Invalid packet: too short");
                     buffer.clear();
