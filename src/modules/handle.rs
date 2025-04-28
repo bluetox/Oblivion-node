@@ -77,20 +77,27 @@ pub async fn forward(
         println!("{:?}", &connections);
         connections.get(&user_id_hex).cloned()
     };
-    if let Some(stream) = connection {
+    let failed = if let Some(stream) = connection {
         let mut locked_writer = stream.lock().await;
         if let Err(e) = locked_writer.write_all(&decypted_packet).await {
             println!("[ERROR] Failed to write to socket: {}", e);
+            true
         } else {
             println!("Message successfully sent to {}", user_id_hex);
+            false
         }
-    }
-    else {
+    } else {
+        println!("No connection for {}", user_id_hex);
+        true
+    };
+
+    if failed {
         println!("No connection for {}", user_id_hex);
         for raw_ip in super::node_assign::find_closest_hashes(&hex::decode(&user_id_hex).unwrap(), 4).await {
             let ip: std::net::IpAddr = raw_ip.parse().expect("Invalid IP address");
             if raw_ip == super::super::PUBLIC_IP.lock().unwrap().to_string() {
                 save_packet(user_id_hex.clone(), decypted_packet.to_vec()).await;
+                return;
             }
             decypted_packet[3] |= 1 << 7;
             match utils::send_tcp_message(&ip, &decypted_packet).await {
@@ -103,6 +110,10 @@ pub async fn forward(
                 },
             }
         }
+    }
+
+    else {
+        println!("Error processing packet");
     }
 }
 
