@@ -95,7 +95,7 @@ pub async fn forward(
         println!("No connection for {}", user_id_hex);
         for raw_ip in super::node_assign::find_closest_hashes(&hex::decode(&user_id_hex).unwrap(), 4).await {
             let ip: std::net::IpAddr = raw_ip.parse().expect("Invalid IP address");
-            if raw_ip == super::super::PUBLIC_IP.lock().unwrap().to_string() {
+            if raw_ip == super::super::PUBLIC_IP.lock().unwrap().to_string() || raw_ip == "127.0.0.1"{
                 save_packet(user_id_hex.clone(), decypted_packet.to_vec()).await;
                 return;
             }
@@ -110,10 +110,6 @@ pub async fn forward(
                 },
             }
         }
-    }
-
-    else {
-        println!("Error processing packet");
     }
 }
 

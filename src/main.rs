@@ -109,10 +109,12 @@ async fn handle_client(
         match read_half.read_buf(&mut buffer).await {
             Ok(0) => {
                 if user_id.len() > 0 {
-                    let connections = CONNECTIONS.write().await;
+                    let mut connections = CONNECTIONS.write().await;
                     if let Some(existing_arc) = connections.get(&user_id) {
                         if Arc::ptr_eq(existing_arc, &writer) {
-                            println!("DUPE request");
+                            println!("Connection closed by client: {}", user_id);
+                            connections.remove(&user_id);
+                            println!("{:?}", connections);
                         }
                     }
                 break;
