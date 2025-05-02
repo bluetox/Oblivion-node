@@ -8,7 +8,7 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::RwLock;
-use bytes::BytesMut;
+use bytes::{buf, Buf, BytesMut};
 use std::fs::OpenOptions;
 
 mod modules;
@@ -105,6 +105,7 @@ async fn handle_client(
     let writer = Arc::new(Mutex::new(write_half));
     let mut user_id = String::new();
     let mut shared_secret: [u8; 32] = [0; 32];
+    
     loop {
         match read_half.read_buf(&mut buffer).await {
             Ok(0) => {
@@ -132,21 +133,36 @@ async fn handle_client(
                 }
 
                 let prefix = &buffer[0..3];
-                let payload_size_bytes = &buffer[1..3];
-                let payload_size = u16::from_le_bytes([payload_size_bytes[0], payload_size_bytes[1]]) as usize;
-                if buffer.len() < payload_size as usize {
+                let payload_size = if prefix[0] == 0xF0 {
+                    let payload_size_bytes = &buffer[1..5];
+                    u32::from_le_bytes([
+                        payload_size_bytes[0],
+                        payload_size_bytes[1],
+                        payload_size_bytes[2],
+                        payload_size_bytes[3],
+                    ]) as usize
+                } else {
+                    let payload_size_bytes = &buffer[1..3];
+                    u16::from_le_bytes([
+                        payload_size_bytes[0],
+                        payload_size_bytes[1],
+                    ]) as usize
+                };
+
+                if buffer.len() < payload_size{
                     continue;
                 }
+
                 let unique_request_hash = modules::crypto::sha256_hash(&buffer);
                 {
                     let mut hashes = REQUEST_HASHES.lock().await;
                     if hashes.contains(&unique_request_hash) {
-                        println!("Duplicate request detected");
-                        buffer.clear();
+                        buffer.advance(payload_size);
                         continue;
                     }
                     hashes.insert(unique_request_hash);
                 }
+                println!("Payload size: {}", payload_size);
                 match prefix[0] {
                     0 => {
                         let public_kk = &buffer[5 .. 5 + 1568];
@@ -166,9 +182,31 @@ async fn handle_client(
                     2..=4 => modules::handle::forward(&buffer, &shared_secret.to_vec()).await,
                     10 => {
                         modules::handle::handle_node_assignement(&buffer, writer.clone()).await},
-                    _ => println!("Data not recognized"),
+                    0xF0 => {                       let dst_user_id_bytes = &buffer[5 .. 5 + 32];
+                        let user_id = hex::encode(dst_user_id_bytes);
+                        let connection = {
+                            let connections = CONNECTIONS.read().await;
+                            println!("{:?}", &connections);
+                            connections.get(&user_id).cloned()
+                        };
+                        let failed = if let Some(stream) = connection {
+                            let mut locked_writer = stream.lock().await;
+                            if let Err(e) = locked_writer.write_all(&buffer).await {
+                                println!("[ERROR] Failed to write to socket: {}", e);
+                                true
+                            } else {
+                                println!("Message successfully sent to {}", user_id);
+                                false
+                            }
+                        } else {
+                            println!("No connection for {}", user_id);
+                            true
+                        };
+                    },
+                    _ => {}
                 }
-                buffer.clear();
+                buffer.advance(payload_size);
+                println!("Advanced buffer length: {}", buffer.len());
             }
             Err(e) => {
                 println!("[ERROR] Failed to read from socket: {}", e);

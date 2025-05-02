@@ -628,8 +628,6 @@ dependencies = [
 [[package]]
 name = "pqc_dilithium"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "580a6801ec2155f89317b08e5aab68dee8f541db974e0c72b7e43aa65c1f4a4a"
 dependencies = [
  "rand",
  "rand_core",
