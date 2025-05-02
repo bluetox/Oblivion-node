@@ -178,10 +178,10 @@ async fn handle_client(
                             locked_writer.write_all(&message).await.unwrap();
                         }
                     },
-                    1 => modules::handle::handle_connect(&buffer, writer.clone(), &mut user_id, &shared_secret.to_vec()).await,
-                    2..=4 => modules::handle::forward(&buffer, &shared_secret.to_vec()).await,
+                    1 => modules::handle::handle_connect(&buffer[..payload_size], writer.clone(), &mut user_id, &shared_secret.to_vec()).await,
+                    2..=4 => modules::handle::forward(&buffer[..payload_size], &shared_secret.to_vec()).await,
                     10 => {
-                        modules::handle::handle_node_assignement(&buffer, writer.clone()).await},
+                        modules::handle::handle_node_assignement(&buffer[..payload_size], writer.clone()).await},
                     0xF0 => {                       let dst_user_id_bytes = &buffer[5 .. 5 + 32];
                         let user_id = hex::encode(dst_user_id_bytes);
                         let connection = {
@@ -191,7 +191,7 @@ async fn handle_client(
                         };
                         let failed = if let Some(stream) = connection {
                             let mut locked_writer = stream.lock().await;
-                            if let Err(e) = locked_writer.write_all(&buffer).await {
+                            if let Err(e) = locked_writer.write_all(&buffer[..payload_size]).await {
                                 println!("[ERROR] Failed to write to socket: {}", e);
                                 true
                             } else {

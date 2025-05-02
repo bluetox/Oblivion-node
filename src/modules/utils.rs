@@ -83,7 +83,7 @@ pub async fn delete_packets_for_user(hash: &str) -> bool {
     store.remove(hash).is_some()
 }
 
-pub async fn decrypt_packet(encrypted_packet: &BytesMut, shared_secret: &[u8]) -> Option<BytesMut> {
+pub async fn decrypt_packet(encrypted_packet: &[u8], shared_secret: &[u8]) -> Option<BytesMut> {
     let payload_size_bytes = &encrypted_packet[1..3];
     let payload_size = u16::from_le_bytes([payload_size_bytes[0], payload_size_bytes[1]]) as usize;
 

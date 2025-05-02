@@ -16,7 +16,7 @@ use pqc_dilithium::verify;
 use ed25519_dalek::{VerifyingKey, Signature, Verifier};
 
 pub async fn forward(
-    encrypted_packet: &BytesMut,
+    encrypted_packet: &[u8],
     shared_secret: &[u8]
 ) {
     println!("received forward");
@@ -114,7 +114,7 @@ pub async fn forward(
 }
 
 pub async fn handle_connect(
-    encrypted_packet: &BytesMut,
+    encrypted_packet: &[u8],
     writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
     user_id:  &mut String,
     shared_secret: &[u8]
@@ -192,7 +192,7 @@ pub async fn handle_connect(
 }
 
 pub async fn handle_node_assignement(
-    buffer: &BytesMut,
+    buffer: &[u8],
     writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>
 ) {
     let payload_size_bytes = &buffer[1..3];
