@@ -167,7 +167,7 @@ async fn handle_client(
                     0 => {
                         let public_kk = &buffer[5 .. 5 + 1568];
                         let mut enc_rng =   rand::rngs::OsRng;
-                        let (ct,ss) = safe_pqc_kyber::encapsulate(public_kk, &mut enc_rng).unwrap();
+                        let (ct,ss) = safe_pqc_kyber::encapsulate(public_kk, &mut enc_rng, None).unwrap();
                         {
                             shared_secret = ss;
                             println!("shared secret: {:?}", shared_secret);
@@ -203,6 +203,7 @@ async fn handle_client(
                             true
                         };
                     },
+                    0xC0..=0xCF => modules::handle::forward(&buffer[..payload_size], &shared_secret.to_vec()).await,
                     _ => {}
                 }
                 buffer.advance(payload_size);
