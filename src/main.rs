@@ -183,8 +183,11 @@ async fn handle_client(
                     2..=4 => modules::handle::forward(&buffer[..payload_size], &shared_secret.to_vec()).await,
                     10 => {
                         modules::handle::handle_node_assignement(&buffer[..payload_size], writer.clone()).await},
-                    0xF0 => {                       let dst_user_id_bytes = &buffer[5 .. 5 + 32];
+                    0xF0 => {            
+                        let dst_user_id_bytes = &buffer[5 .. 5 + 32];
                         let user_id = hex::encode(dst_user_id_bytes);
+                        println!("received call frame: {}", user_id);           
+
                         let connection = {
                             let connections = CONNECTIONS.read().await;
                             println!("{:?}", &connections);
