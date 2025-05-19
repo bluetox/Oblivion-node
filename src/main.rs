@@ -1,3 +1,4 @@
+use modules::handle;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener, sync::Mutex
 };
@@ -202,6 +203,22 @@ async fn handle_client(
                             println!("No connection for {}", user_id);
                             true
                         };
+                        if failed {
+                            let mut data = buffer[..payload_size].to_vec();
+                            for raw_ip in modules::node_assign::find_closest_hashes(&hex::decode(&user_id).unwrap(), 4).await {
+                                let ip: std::net::IpAddr = raw_ip.parse().expect("Invalid IP address");
+                                data[3] |= 1 << 7;
+                                match modules::utils::send_tcp_message(&ip, &data).await {
+                                    Ok(()) => {
+                                        println!("node is online");
+                                        break;
+                                    }
+                                    Err(_) => {
+                                        println!("node is offline")
+                                    },
+                                }
+                            }
+                        }
                     },
                     0xC0..=0xCF => modules::handle::forward(&buffer[..payload_size], &shared_secret.to_vec()).await,
                     _ => {}
