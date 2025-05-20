@@ -313,7 +313,7 @@ async fn handle_client(socket: tokio::net::TcpStream) {
                     // switch sur packet[0]
                     match packet[0] {
                         0 => {
-                            let public_kk = &buffer[5 .. 5 + 1568];
+                            let public_kk = &packet[5 .. 5 + 1568];
                             let mut enc_rng =   rand::rngs::OsRng;
                             let (ct,ss) = safe_pqc_kyber::encapsulate(public_kk, &mut enc_rng, None).unwrap();
                             {
