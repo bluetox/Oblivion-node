@@ -151,6 +151,7 @@ async fn handle_client(
                 };
 
                 if buffer.len() < payload_size{
+                    println!("payload size expected: {}", payload_size);
                     continue;
                 }
 
