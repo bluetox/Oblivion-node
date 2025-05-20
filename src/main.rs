@@ -207,10 +207,11 @@ async fn handle_client(
                             true
                         };
                         if failed {
-                            let mut data = buffer[..payload_size].to_vec();
                             for raw_ip in modules::node_assign::find_closest_hashes(&hex::decode(&user_id).unwrap(), 4).await {
                                 let ip: std::net::IpAddr = raw_ip.parse().expect("Invalid IP address");
-                                match modules::utils::send_tcp_message(&ip, &data).await {
+                                if !(raw_ip == PUBLIC_IP.lock().unwrap().to_string()) || !(raw_ip == "127.0.0.1") {
+                                
+                                match modules::utils::send_tcp_message(&ip, &buffer[..payload_size]).await {
                                     Ok(()) => {
                                         println!("node is online");
                                         break;
@@ -219,6 +220,7 @@ async fn handle_client(
                                         println!("node is offline")
                                     },
                                 }
+                            }
                             }
                         }
                     },
