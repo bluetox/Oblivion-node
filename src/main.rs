@@ -249,6 +249,7 @@ async fn handle_client(socket: tokio::net::TcpStream) {
     let writer = Arc::new(Mutex::new(write_half));
     let mut user_id = String::new();
     let mut shared_secret: [u8; 32] = [0; 32];
+    let mut video_call_socket: Option<TcpStream> = None;
 
     loop {
         // 1) On remplit le buffer
@@ -299,7 +300,7 @@ async fn handle_client(socket: tokio::net::TcpStream) {
                     // d) On a un paquet complet → on l’enlève du buffer après traitement
                     let packet = buffer.split_to(payload_size);
 
-                    // e) Traitement du packet
+                    /*
                     let unique_request_hash = modules::crypto::sha256_hash(&packet);
                     {
                         let mut hashes = REQUEST_HASHES.lock().await;
@@ -309,7 +310,7 @@ async fn handle_client(socket: tokio::net::TcpStream) {
                         }
                         hashes.insert(unique_request_hash);
                     }
-
+                    */
                     // switch sur packet[0]
                     match packet[0] {
                         0 => {
@@ -355,7 +356,6 @@ async fn handle_client(socket: tokio::net::TcpStream) {
                             };
 
                             if failed {
-                                // nœud de secours
                                 for raw_ip in modules::node_assign::find_closest_hashes(
                                         &hex::decode(&call_user).unwrap(), 4
                                     ).await
@@ -363,16 +363,36 @@ async fn handle_client(socket: tokio::net::TcpStream) {
                                     if raw_ip != PUBLIC_IP.lock().unwrap().to_string()
                                         && raw_ip != "127.0.0.1"
                                     {
+
                                         let ip: std::net::IpAddr = raw_ip.parse().unwrap();
-                                        if modules::utils::send_tcp_message(
-                                            &ip, &packet[..]
-                                        ).await.is_ok() {
-                                            println!("node is online");
-                                            break;
-                                        } else {
-                                            println!("node is offline");
+                                        match &mut video_call_socket {
+                                            Some(socket) => {
+                                                if socket.write_all(&packet).is_ok() {
+                                                    println!("Sent packet to existing video call socket: {}", ip);
+                                                    break;
+                                                } else {
+                                                    println!("Failed writing to existing socket. Dropping it.");
+                                                }
+                                            }
+                                            None => {
+                                                match TcpStream::connect((ip, 32775)) {
+                                                    Ok(mut stream) => {
+                                                        println!("Connection established with node: {}", ip);
+                                                        if stream.write_all(&packet).is_ok() {
+                                                            video_call_socket = Some(stream);
+                                                            break;
+                                                        } else {
+                                                            println!("Failed to write after connecting to {}", ip);
+                                                        }
+                                                    }
+                                                    Err(err) => {
+                                                        println!("Failed to connect to {}: {}", ip, err);
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
+                                    break;
                                 }
                             }
                         }
