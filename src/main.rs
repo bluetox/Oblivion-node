@@ -283,10 +283,10 @@ async fn handle_client(socket: tokio::net::TcpStream) {
                         // 1 + 4 octets de longueur
                         let sz = u32::from_le_bytes(buffer[1..5].try_into().unwrap()) as usize;
                         // l’entête fait 5 octets (1+4), sinon 3 octets
-                        sz + 5
+                        sz
                     } else {
                         let sz = u16::from_le_bytes(buffer[1..3].try_into().unwrap()) as usize;
-                        sz + 3
+                        sz
                     };
                     println!("payload size: {}", payload_size);
 
