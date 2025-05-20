@@ -210,7 +210,6 @@ async fn handle_client(
                             let mut data = buffer[..payload_size].to_vec();
                             for raw_ip in modules::node_assign::find_closest_hashes(&hex::decode(&user_id).unwrap(), 4).await {
                                 let ip: std::net::IpAddr = raw_ip.parse().expect("Invalid IP address");
-                                data[3] |= 1 << 7;
                                 match modules::utils::send_tcp_message(&ip, &data).await {
                                     Ok(()) => {
                                         println!("node is online");
