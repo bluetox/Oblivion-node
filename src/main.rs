@@ -97,7 +97,7 @@ async fn main() -> std::io::Result<()> {
         tokio::spawn(handle_client(socket));
     }
 }
-
+/*
 async fn handle_client(
     socket: tokio::net::TcpStream, 
 ) {
@@ -237,6 +237,139 @@ async fn handle_client(
                     connections.remove(&user_id);
                     println!("{:?}", connections)
                 }
+                break;
+            }
+        }
+    }
+}
+*/
+async fn handle_client(socket: tokio::net::TcpStream) {
+    let mut buffer = BytesMut::with_capacity(1024);
+    let (mut read_half, write_half) = socket.into_split();
+    let writer = Arc::new(Mutex::new(write_half));
+    let mut user_id = String::new();
+    let mut shared_secret: [u8; 32] = [0; 32];
+
+    loop {
+        // 1) On remplit le buffer
+        match read_half.read_buf(&mut buffer).await {
+            Ok(0) => {
+                if user_id.len() > 0 {
+                    let mut connections = CONNECTIONS.write().await;
+                    if let Some(existing_arc) = connections.get(&user_id) {
+                        if Arc::ptr_eq(existing_arc, &writer) {
+                            println!("Connection closed by client: {}", user_id);
+                            connections.remove(&user_id);
+                            println!("{:?}", connections);
+                        }
+                    }
+                break;
+                }
+
+                println!("a connection was cleanely aborted");
+                break
+            },
+            Ok(_n) => {
+                // 2) Tant qu’on a potentiellement un paquet complet à parser
+                loop {
+                    // a) On a besoin d’au moins 3 octets pour l'entête
+                    if buffer.len() < 3 {
+                        break;
+                    }
+
+                    let prefix = &buffer[0..3];
+                    // b) On décode payload_size selon prefix[0]
+                    let payload_size = if prefix[0] == 0xF0 {
+                        // 1 + 4 octets de longueur
+                        let sz = u32::from_le_bytes(buffer[1..5].try_into().unwrap()) as usize;
+                        // l’entête fait 5 octets (1+4), sinon 3 octets
+                        sz + 5
+                    } else {
+                        let sz = u16::from_le_bytes(buffer[1..3].try_into().unwrap()) as usize;
+                        sz + 3
+                    };
+
+                    // c) On vérifie qu’on a tout reçu
+                    if buffer.len() < payload_size {
+                        // pas complet → on sort de la boucle de parsing, 
+                        // on attend d'autres données
+                        break;
+                    }
+
+                    // d) On a un paquet complet → on l’enlève du buffer après traitement
+                    let packet = buffer.split_to(payload_size);
+
+                    // e) Traitement du packet
+                    let unique_request_hash = modules::crypto::sha256_hash(&packet);
+                    {
+                        let mut hashes = REQUEST_HASHES.lock().await;
+                        if hashes.contains(&unique_request_hash) {
+                            // déjà vu → on ignore
+                            continue;
+                        }
+                        hashes.insert(unique_request_hash);
+                    }
+
+                    // switch sur packet[0]
+                    match packet[0] {
+                        0 => {
+                            // clé publique KYBER...
+                        }
+                        1 => {
+                            modules::handle::handle_connect(
+                                &packet[..], writer.clone(), &mut user_id, &shared_secret.to_vec()
+                            ).await
+                        }
+                        2..=4 | 0xC0..=0xCF => {
+                            modules::handle::forward(&packet[..], &shared_secret.to_vec()).await
+                        }
+                        10 => {
+                            modules::handle::handle_node_assignement(&packet[..], writer.clone()).await
+                        }
+                        0xF0 => {
+                            // appel vidéo...
+                            let dst_user_id_bytes = &packet[5..5+32];
+                            let call_user = hex::encode(dst_user_id_bytes);
+                            println!("received call frame: {}", call_user);
+                            // tentative écriture directe
+                            let failed = if let Some(stream) = {
+                                let conns = CONNECTIONS.read().await;
+                                conns.get(&call_user).cloned()
+                            } {
+                                let mut w = stream.lock().await;
+                                w.write_all(&packet[..]).await.is_err()
+                            } else {
+                                true
+                            };
+
+                            if failed {
+                                // nœud de secours
+                                for raw_ip in modules::node_assign::find_closest_hashes(
+                                        &hex::decode(&call_user).unwrap(), 4
+                                    ).await
+                                {
+                                    if raw_ip != PUBLIC_IP.lock().unwrap().to_string()
+                                        && raw_ip != "127.0.0.1"
+                                    {
+                                        let ip: std::net::IpAddr = raw_ip.parse().unwrap();
+                                        if modules::utils::send_tcp_message(
+                                            &ip, &packet[..]
+                                        ).await.is_ok() {
+                                            println!("node is online");
+                                            break;
+                                        } else {
+                                            println!("node is offline");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[ERROR] Failed to read from socket: {}", e);
                 break;
             }
         }
