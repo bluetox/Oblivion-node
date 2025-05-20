@@ -164,7 +164,6 @@ async fn handle_client(
                     }
                     hashes.insert(unique_request_hash);
                 }
-                println!("Payload size: {}", payload_size);
                 match prefix[0] {
                     0 => {
                         let public_kk = &buffer[5 .. 5 + 1568];
