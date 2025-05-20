@@ -288,11 +288,11 @@ async fn handle_client(socket: tokio::net::TcpStream) {
                         let sz = u16::from_le_bytes(buffer[1..3].try_into().unwrap()) as usize;
                         sz + 3
                     };
+                    println!("payload size: {}", payload_size);
 
                     // c) On vérifie qu’on a tout reçu
                     if buffer.len() < payload_size {
-                        // pas complet → on sort de la boucle de parsing, 
-                        // on attend d'autres données
+                        println!("requirement not met: {}", buffer.len());
                         break;
                     }
 
