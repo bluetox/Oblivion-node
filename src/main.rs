@@ -313,8 +313,19 @@ async fn handle_client(socket: tokio::net::TcpStream) {
                     // switch sur packet[0]
                     match packet[0] {
                         0 => {
-                            // clé publique KYBER...
-                        }
+                            let public_kk = &buffer[5 .. 5 + 1568];
+                            let mut enc_rng =   rand::rngs::OsRng;
+                            let (ct,ss) = safe_pqc_kyber::encapsulate(public_kk, &mut enc_rng, None).unwrap();
+                            {
+                                shared_secret = ss;
+                                println!("shared secret: {:?}", shared_secret);
+                                let mut message = BytesMut::with_capacity(1573);
+                                message.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00]);
+                                message.extend_from_slice(&ct);
+                                let mut locked_writer = writer.lock().await;
+                                locked_writer.write_all(&message).await.unwrap();
+                            }
+                        },
                         1 => {
                             modules::handle::handle_connect(
                                 &packet[..], writer.clone(), &mut user_id, &shared_secret.to_vec()
@@ -326,6 +337,7 @@ async fn handle_client(socket: tokio::net::TcpStream) {
                         10 => {
                             modules::handle::handle_node_assignement(&packet[..], writer.clone()).await
                         }
+                        
                         0xF0 => {
                             // appel vidéo...
                             let dst_user_id_bytes = &packet[5..5+32];
