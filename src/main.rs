@@ -209,8 +209,7 @@ async fn handle_client(
                         if failed {
                             for raw_ip in modules::node_assign::find_closest_hashes(&hex::decode(&user_id).unwrap(), 4).await {
                                 let ip: std::net::IpAddr = raw_ip.parse().expect("Invalid IP address");
-                                if !(raw_ip == PUBLIC_IP.lock().unwrap().to_string()) || !(raw_ip == "127.0.0.1") {
-                                
+                                if raw_ip != PUBLIC_IP.lock().unwrap().to_string() && raw_ip != "127.0.0.1" {
                                 match modules::utils::send_tcp_message(&ip, &buffer[..payload_size]).await {
                                     Ok(()) => {
                                         println!("node is online");
