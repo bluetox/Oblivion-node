@@ -220,6 +220,7 @@ async fn handle_client(
                                     },
                                 }
                             }
+                            break;
                             }
                         }
                     },
