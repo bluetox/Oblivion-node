@@ -252,7 +252,6 @@ async fn handle_client(socket: tokio::net::TcpStream) {
     let mut video_call_socket: Option<TcpStream> = None;
 
     loop {
-        // 1) On remplit le buffer
         match read_half.read_buf(&mut buffer).await {
             Ok(0) => {
                 if user_id.len() > 0 {
@@ -271,33 +270,24 @@ async fn handle_client(socket: tokio::net::TcpStream) {
                 break
             },
             Ok(_n) => {
-                // 2) Tant qu’on a potentiellement un paquet complet à parser
                 loop {
-                    // a) On a besoin d’au moins 3 octets pour l'entête
                     if buffer.len() < 3 {
                         break;
                     }
 
                     let prefix = &buffer[0..3];
-                    // b) On décode payload_size selon prefix[0]
                     let payload_size = if prefix[0] == 0xF0 {
-                        // 1 + 4 octets de longueur
                         let sz = u32::from_le_bytes(buffer[1..5].try_into().unwrap()) as usize;
-                        // l’entête fait 5 octets (1+4), sinon 3 octets
                         sz
                     } else {
                         let sz = u16::from_le_bytes(buffer[1..3].try_into().unwrap()) as usize;
                         sz
                     };
-                    println!("payload size: {}", payload_size);
 
-                    // c) On vérifie qu’on a tout reçu
                     if buffer.len() < payload_size {
-                        println!("requirement not met: {}", buffer.len());
                         break;
                     }
 
-                    // d) On a un paquet complet → on l’enlève du buffer après traitement
                     let packet = buffer.split_to(payload_size);
 
                     /*
@@ -340,11 +330,9 @@ async fn handle_client(socket: tokio::net::TcpStream) {
                         }
                         
                         0xF0 => {
-                            // appel vidéo...
                             let dst_user_id_bytes = &packet[5..5+32];
                             let call_user = hex::encode(dst_user_id_bytes);
-                            println!("received call frame: {}", call_user);
-                            // tentative écriture directe
+
                             let failed = if let Some(stream) = {
                                 let conns = CONNECTIONS.read().await;
                                 conns.get(&call_user).cloned()

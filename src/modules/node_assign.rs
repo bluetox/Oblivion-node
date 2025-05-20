@@ -65,7 +65,6 @@ fn _write_sorted_hashes_to_file(file: &mut File, hashes: &[IpHash]) -> io::Resul
 }
 
 pub async fn find_closest_hashes(target_hash: &Vec<u8>, n: usize) -> Vec<String> {
-    println!("the user_id is: {}", hex::encode(&target_hash));
     let hashes = super::super::NODES_HASHMAP.lock().await;
     let target_num = BigUint::from_bytes_be(target_hash);
     let mut left = 0;
@@ -107,11 +106,9 @@ pub async fn find_closest_hashes(target_hash: &Vec<u8>, n: usize) -> Vec<String>
             lower_diff <= upper_diff
         }) {
             closest.push(hashes[lower].ip.clone());
-            println!("hash of ip: {}, ip associated: {}",hex::encode(&hashes[lower].hash), &hashes[lower].ip);
             if lower > 0 { lower -= 1; }
         } else {
             closest.push(hashes[upper].ip.clone());
-            println!("hash of ip: {}, ip associated: {}",hex::encode(&hashes[upper].hash), &hashes[upper].ip);
             upper += 1;
         }
     }
