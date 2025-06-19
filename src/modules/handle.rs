@@ -8,7 +8,6 @@ use tokio::{
     io::AsyncWriteExt,
     sync::Mutex,
 };
-
 use std::sync::Arc;
 use bytes::BytesMut;
 use hex;
@@ -18,14 +17,14 @@ use ed25519_dalek::{VerifyingKey, Signature, Verifier};
 pub async fn forward(
     encrypted_packet: &[u8],
     shared_secret: &[u8]
-) {
+) -> Result<(), String>{
     println!("received forward");
     let mut decypted_packet : Vec<u8>;
     if (encrypted_packet[3] & (1 << 7)) != 0 {
         decypted_packet = encrypted_packet.to_vec();
     }
     else {
-        decypted_packet = super::utils::decrypt_packet(encrypted_packet, shared_secret).await.unwrap().to_vec();
+        decypted_packet = super::utils::decrypt_packet(encrypted_packet, shared_secret).await?.to_vec();
     }
     
     let payload_size_bytes = &decypted_packet[1..3];
@@ -46,13 +45,10 @@ pub async fn forward(
     let data_to_sign_bytes = &decypted_packet[5 + 3293 + 64 ..payload_size];
 
     if !check_ts_validity(timestamp) {
-        println!("[ERROR] Timestamp invalid, dropping message");
+        // TODO handle invalid timestamp
     }
 
-    if !verify(&dilithium_signature, &data_to_sign_bytes, &dilithium_public_key_bytes).is_ok() {
-        println!("[ERROR] Invalid signature, dropping message.");
-        return;
-    }
+    verify(dilithium_signature, data_to_sign_bytes, dilithium_public_key_bytes).map_err(|_| "Dilithium signature invalid".to_string())?;
     
     let ed_public_key_array: &[u8; 32] = ed25519_public_key
         .try_into()
@@ -62,16 +58,10 @@ pub async fn forward(
         .try_into()
         .expect("Signature must be exactly 64 bytes");
 
-    match VerifyingKey::from_bytes(ed_public_key_array) {
-        Ok(public_key) => {
-            let signature = Signature::from_bytes(ed_signature_array);
-            match public_key.verify(data_to_sign_bytes, &signature) {
-                Ok(_) => println!("✅ Ed25519 Signature is valid!"),
-                Err(_) => return,
-            }
-        },
-        Err(_) => return,
-    }
+    let public_key = VerifyingKey::from_bytes(ed_public_key_array).map_err(|e| e.to_string())?;
+    let signature = Signature::from_bytes(ed_signature_array);
+    public_key.verify(data_to_sign_bytes, &signature).map_err(|e| e.to_string())?;
+
     let connection = {
         let connections = CONNECTIONS.read().await;
         println!("{:?}", &connections);
@@ -97,7 +87,7 @@ pub async fn forward(
             let ip: std::net::IpAddr = raw_ip.parse().expect("Invalid IP address");
             if raw_ip == super::super::PUBLIC_IP.lock().unwrap().to_string() || raw_ip == "127.0.0.1"{
                 save_packet(user_id_hex.clone(), decypted_packet.to_vec()).await;
-                return;
+                return Ok(());
             }
             decypted_packet[3] |= 1 << 7;
             match utils::send_tcp_message(&ip, &decypted_packet).await {
@@ -111,15 +101,15 @@ pub async fn forward(
             }
         }
     }
+    Ok(())
 }
 
 pub async fn handle_connect(
     encrypted_packet: &[u8],
     writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
-    user_id:  &mut String,
     shared_secret: &[u8]
-) {
-    let decypted_packet=  super::utils::decrypt_packet(encrypted_packet, shared_secret).await.unwrap();
+) -> Result<String, String> {
+    let decypted_packet=  super::utils::decrypt_packet(encrypted_packet, shared_secret).await?;
     let dilithium_signature = &decypted_packet[5 .. 5 + 3293];
     let ed25519_signature = &decypted_packet[5 + 3293 .. 5 + 3293 + 64];
 
@@ -140,22 +130,15 @@ pub async fn handle_connect(
         .try_into()
         .expect("Signature must be exactly 64 bytes");
 
-    match VerifyingKey::from_bytes(ed_public_key_array) {
-        Ok(public_key) => {
-            let signature = Signature::from_bytes(ed_signature_array);
-            match public_key.verify(data_to_sign_bytes, &signature) {
-                Ok(_) => println!("✅ Ed25519 Signature is valid!"),
-                Err(_) => return,
-            }
-        },
-        Err(_) => return,
-    }
-    let result = verify(dilithium_signature, data_to_sign_bytes, dilithium_public_key_bytes).is_ok();
-    if !result {
-        return;
-    }
+    let public_key = VerifyingKey::from_bytes(ed_public_key_array).map_err(|e| e.to_string())?;
+    let signature = Signature::from_bytes(ed_signature_array);
+    public_key.verify(data_to_sign_bytes, &signature).map_err(|e| e.to_string())?;
+
+    
+    verify(dilithium_signature, data_to_sign_bytes, dilithium_public_key_bytes).map_err(|_| "Dilithium signature invalid".to_string())?;
+
     if !utils::check_ts_validity(timestamp) {
-        return;
+        // TODO handle invalid timestamp
     }
     let full_hash_input = [
         &dilithium_public_key_bytes[..],
@@ -165,7 +148,6 @@ pub async fn handle_connect(
 
     let public_id = crypto::sha256_hash(&full_hash_input);
 
-    user_id.push_str(&public_id);
     {
         let mut conn_map = CONNECTIONS.write().await;
         conn_map.insert(public_id.clone(), Arc::clone(&writer));
@@ -188,13 +170,13 @@ pub async fn handle_connect(
             }
         }
     }
-    println!("Connexion request properly formated");
+    Ok(public_id)
 }
 
 pub async fn handle_node_assignement(
     buffer: &[u8],
     writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>
-) {
+) -> Result<(), String> {
     let payload_size_bytes = &buffer[1..3];
     let payload_size = u16::from_le_bytes([payload_size_bytes[0], payload_size_bytes[1]]) as usize;
     let dilithium_signature = &buffer[5 .. 5 + 3293];
@@ -217,22 +199,14 @@ pub async fn handle_node_assignement(
         .try_into()
         .expect("Signature must be exactly 64 bytes");
 
-    match VerifyingKey::from_bytes(ed_public_key_array) {
-        Ok(public_key) => {
-            let signature = Signature::from_bytes(ed_signature_array);
-            match public_key.verify(data_to_sign_bytes, &signature) {
-                Ok(_) => println!("✅ Ed25519 Signature is valid!"),
-                Err(_) => return,
-            }
-        },
-        Err(_) => return,
-    }
-    let result = verify(dilithium_signature, data_to_sign_bytes, dilithium_public_key_bytes).is_ok();
-    if !result {
-        return;
-    }
+    let public_key = VerifyingKey::from_bytes(ed_public_key_array).map_err(|e| e.to_string())?;
+    let signature = Signature::from_bytes(ed_signature_array);
+    public_key.verify(data_to_sign_bytes, &signature).map_err(|e| e.to_string())?;
+
+    verify(dilithium_signature, data_to_sign_bytes, dilithium_public_key_bytes).map_err(|_| "Dilithium signature invalid".to_string())?;
+
     if !utils::check_ts_validity(timestamp) {
-        return;
+        // TODO handle invalid timestamp
     }
     let full_hash_input = [
         &dilithium_public_key_bytes[..],
@@ -256,5 +230,5 @@ pub async fn handle_node_assignement(
     let mut locked_writer = writer.lock().await;
     locked_writer.write_all(&buffer).await.expect("Write failed");
     
-    
+    Ok(())
 }

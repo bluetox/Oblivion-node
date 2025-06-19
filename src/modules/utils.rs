@@ -83,13 +83,12 @@ pub async fn delete_packets_for_user(hash: &str) -> bool {
     store.remove(hash).is_some()
 }
 
-pub async fn decrypt_packet(encrypted_packet: &[u8], shared_secret: &[u8]) -> Option<BytesMut> {
+pub async fn decrypt_packet(encrypted_packet: &[u8], shared_secret: &[u8]) -> Result<BytesMut, String> {
     let payload_size_bytes = &encrypted_packet[1..3];
     let payload_size = u16::from_le_bytes([payload_size_bytes[0], payload_size_bytes[1]]) as usize;
 
     if encrypted_packet.len() < payload_size {
-        println!("[ERROR] Buffer is too short for declared payload size.");
-        return None;
+        return Err("Encrypted packet size is smaller than expected payload size".to_string());
     }
 
     let encrypted_data = &encrypted_packet[5.. payload_size];
@@ -97,8 +96,7 @@ pub async fn decrypt_packet(encrypted_packet: &[u8], shared_secret: &[u8]) -> Op
     let decrypted_data = match super::encryption::decrypt_message(encrypted_data, shared_secret).await {
         Ok(data) => data,
         Err(e) => {
-            println!("[ERROR] Decryption failed: {}", e);
-            return None;
+            return Err(format!("Decryption failed: {}", e));
         }
     };
 
@@ -109,5 +107,5 @@ pub async fn decrypt_packet(encrypted_packet: &[u8], shared_secret: &[u8]) -> Op
     let total_size = decrypted_packet.len() as u16;
     decrypted_packet[1..3].copy_from_slice(&total_size.to_le_bytes());
 
-    Some(decrypted_packet)
+    Ok(decrypted_packet)
 }

@@ -1,4 +1,3 @@
-use modules::handle;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener, sync::Mutex
 };
@@ -9,7 +8,7 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::RwLock;
-use bytes::{buf, Buf, BytesMut};
+use bytes::{buf, BufMut, BytesMut};
 use std::fs::OpenOptions;
 
 mod modules;
@@ -33,6 +32,46 @@ lazy_static::lazy_static! {
 lazy_static::lazy_static! {
     pub static ref PUBLIC_IP: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 }
+
+
+
+async fn error_terminate_conn(
+    user_id: &str, writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>, error: &str
+) {
+    if user_id.len() > 0 {
+        let mut connections = CONNECTIONS.write().await;
+        if let Some(existing_arc) = connections.get(user_id) {
+            if Arc::ptr_eq(existing_arc, &writer) {
+                println!("Connection closed by client: {}", user_id);
+                connections.remove(user_id);
+            }
+        }
+    }
+    notify_user_of_disconnection(writer, error).await;
+}
+
+
+pub async fn notify_user_of_disconnection(
+    writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
+    error: &str,
+) {
+
+    let mut packet = BytesMut::with_capacity(5 + error.len());
+    packet.put_u8(0xFF);
+    packet.put_u16_le(0);
+    packet.put_u16_le(0);
+    packet.put_slice(error.as_bytes());
+
+    let total_size = packet.len() as u16;
+    let size_bytes = total_size.to_le_bytes();
+    packet[1..3].copy_from_slice(&size_bytes);
+
+    let mut writer = writer.lock().await;
+    if let Err(e) = writer.write_all(&packet).await {
+        eprintln!("Failed to send disconnection notice: {}", e);
+    }
+}
+
 
 async fn get_pub_ip() -> String {
     const SERVER_ADDR: &str = "ipv4.icanhazip.com:80";
@@ -97,152 +136,7 @@ async fn main() -> std::io::Result<()> {
         tokio::spawn(handle_client(socket));
     }
 }
-/*
-async fn handle_client(
-    socket: tokio::net::TcpStream, 
-) {
-    let mut buffer = BytesMut::with_capacity(1024);
-    let (mut read_half, write_half) = socket.into_split();
-    let writer = Arc::new(Mutex::new(write_half));
-    let mut user_id = String::new();
-    let mut shared_secret: [u8; 32] = [0; 32];
-    
-    loop {
-        match read_half.read_buf(&mut buffer).await {
-            Ok(0) => {
-                if user_id.len() > 0 {
-                    let mut connections = CONNECTIONS.write().await;
-                    if let Some(existing_arc) = connections.get(&user_id) {
-                        if Arc::ptr_eq(existing_arc, &writer) {
-                            println!("Connection closed by client: {}", user_id);
-                            connections.remove(&user_id);
-                            println!("{:?}", connections);
-                        }
-                    }
-                break;
-                }
 
-                println!("a connection was cleanely aborted");
-                break
-            },
-
-            Ok(n) => {
-                if n < 3 {
-                    println!("[ERROR] Invalid packet: too short");
-                    buffer.clear();
-                    continue;
-                }
-
-                let prefix = &buffer[0..3];
-                let payload_size = if prefix[0] == 0xF0 {
-                    let payload_size_bytes = &buffer[1..5];
-                    u32::from_le_bytes([
-                        payload_size_bytes[0],
-                        payload_size_bytes[1],
-                        payload_size_bytes[2],
-                        payload_size_bytes[3],
-                    ]) as usize
-                } else {
-                    let payload_size_bytes = &buffer[1..3];
-                    u16::from_le_bytes([
-                        payload_size_bytes[0],
-                        payload_size_bytes[1],
-                    ]) as usize
-                };
-
-                if buffer.len() < payload_size{
-                    println!("payload size expected: {}", payload_size);
-                    continue;
-                }
-
-                let unique_request_hash = modules::crypto::sha256_hash(&buffer);
-                {
-                    let mut hashes = REQUEST_HASHES.lock().await;
-                    if hashes.contains(&unique_request_hash) {
-                        buffer.advance(payload_size);
-                        continue;
-                    }
-                    hashes.insert(unique_request_hash);
-                }
-                match prefix[0] {
-                    0 => {
-                        let public_kk = &buffer[5 .. 5 + 1568];
-                        let mut enc_rng =   rand::rngs::OsRng;
-                        let (ct,ss) = safe_pqc_kyber::encapsulate(public_kk, &mut enc_rng, None).unwrap();
-                        {
-                            shared_secret = ss;
-                            println!("shared secret: {:?}", shared_secret);
-                            let mut message = BytesMut::with_capacity(1573);
-                            message.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00]);
-                            message.extend_from_slice(&ct);
-                            let mut locked_writer = writer.lock().await;
-                            locked_writer.write_all(&message).await.unwrap();
-                        }
-                    },
-                    1 => modules::handle::handle_connect(&buffer[..payload_size], writer.clone(), &mut user_id, &shared_secret.to_vec()).await,
-                    2..=4 => modules::handle::forward(&buffer[..payload_size], &shared_secret.to_vec()).await,
-                    10 => {
-                        modules::handle::handle_node_assignement(&buffer[..payload_size], writer.clone()).await},
-                    0xF0 => {            
-                        let dst_user_id_bytes = &buffer[5 .. 5 + 32];
-                        let user_id = hex::encode(dst_user_id_bytes);
-                        println!("received call frame: {}", user_id);           
-
-                        let connection = {
-                            let connections = CONNECTIONS.read().await;
-                            println!("{:?}", &connections);
-                            connections.get(&user_id).cloned()
-                        };
-                        let failed = if let Some(stream) = connection {
-                            let mut locked_writer = stream.lock().await;
-                            if let Err(e) = locked_writer.write_all(&buffer[..payload_size]).await {
-                                println!("[ERROR] Failed to write to socket: {}", e);
-                                true
-                            } else {
-                                println!("Message successfully sent to {}", user_id);
-                                false
-                            }
-                        } else {
-                            println!("No connection for {}", user_id);
-                            true
-                        };
-                        if failed {
-                            for raw_ip in modules::node_assign::find_closest_hashes(&hex::decode(&user_id).unwrap(), 4).await {
-                                let ip: std::net::IpAddr = raw_ip.parse().expect("Invalid IP address");
-                                if raw_ip != PUBLIC_IP.lock().unwrap().to_string() && raw_ip != "127.0.0.1" {
-                                match modules::utils::send_tcp_message(&ip, &buffer[..payload_size]).await {
-                                    Ok(()) => {
-                                        println!("node is online");
-                                        break;
-                                    }
-                                    Err(_) => {
-                                        println!("node is offline")
-                                    },
-                                }
-                            }
-                            break;
-                            }
-                        }
-                    },
-                    0xC0..=0xCF => modules::handle::forward(&buffer[..payload_size], &shared_secret.to_vec()).await,
-                    _ => {}
-                }
-                buffer.advance(payload_size);
-                println!("Advanced buffer length: {}", buffer.len());
-            }
-            Err(e) => {
-                println!("[ERROR] Failed to read from socket: {}", e);
-                if user_id.len() > 0 {
-                    let mut connections = CONNECTIONS.write().await;
-                    connections.remove(&user_id);
-                    println!("{:?}", connections)
-                }
-                break;
-            }
-        }
-    }
-}
-*/
 async fn handle_client(socket: tokio::net::TcpStream) {
     let mut buffer = BytesMut::with_capacity(1024);
     let (mut read_half, write_half) = socket.into_split();
@@ -254,18 +148,7 @@ async fn handle_client(socket: tokio::net::TcpStream) {
     loop {
         match read_half.read_buf(&mut buffer).await {
             Ok(0) => {
-                if user_id.len() > 0 {
-                    let mut connections = CONNECTIONS.write().await;
-                    if let Some(existing_arc) = connections.get(&user_id) {
-                        if Arc::ptr_eq(existing_arc, &writer) {
-                            println!("Connection closed by client: {}", user_id);
-                            connections.remove(&user_id);
-                            println!("{:?}", connections);
-                        }
-                    }
-                break;
-                }
-
+                error_terminate_conn(&user_id, writer.clone(), "Requested").await;
                 println!("a connection was cleanely aborted");
                 break
             },
@@ -313,20 +196,45 @@ async fn handle_client(socket: tokio::net::TcpStream) {
                                 let mut message = BytesMut::with_capacity(1573);
                                 message.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00]);
                                 message.extend_from_slice(&ct);
+
+                                let total_size = message.len() as u16;
+                                message[1..3].copy_from_slice(&total_size.to_le_bytes());
+                                 
                                 let mut locked_writer = writer.lock().await;
                                 locked_writer.write_all(&message).await.unwrap();
                             }
                         },
                         1 => {
-                            modules::handle::handle_connect(
-                                &packet[..], writer.clone(), &mut user_id, &shared_secret.to_vec()
-                            ).await
+                            user_id = match modules::handle::handle_connect(
+                                &packet[..], writer.clone(), &shared_secret.to_vec()
+                            ).await {
+                                Ok(user_id) => user_id,
+                                Err(e) => {
+                                    error_terminate_conn(&user_id, writer.clone(), &e).await;
+                                    println!("a connection was cleanely aborted: {}", e);
+                                    break
+                                }
+                            }
                         }
                         2..=4 | 0xC0..=0xCF => {
-                            modules::handle::forward(&packet[..], &shared_secret.to_vec()).await
+                            match modules::handle::forward(&packet[..], &shared_secret.to_vec()).await {
+                                Ok(()) => (),
+                                Err(e) => {
+                                    error_terminate_conn(&user_id, writer.clone(), &e).await;
+                                    println!("a connection was cleanely aborted: {}", e);
+                                    break
+                                }
+                            }
                         }
                         10 => {
-                            modules::handle::handle_node_assignement(&packet[..], writer.clone()).await
+                            match modules::handle::handle_node_assignement(&packet[..], writer.clone()).await {
+                                Ok(()) => (),
+                                Err(e) => {
+                                    error_terminate_conn(&user_id, writer.clone(), &e).await;
+                                    println!("a connection was cleanely aborted: {}", e);
+                                    break
+                                }
+                            }
                         }
                         
                         0xF0 => {
