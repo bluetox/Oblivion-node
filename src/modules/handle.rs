@@ -15,34 +15,21 @@ use pqc_dilithium::verify;
 use ed25519_dalek::{VerifyingKey, Signature, Verifier};
 
 pub async fn forward(
-    encrypted_packet: &[u8],
-    shared_secret: &[u8]
+    packet: &[u8],
 ) -> Result<(), String>{
-    println!("received forward");
-    let mut decypted_packet : Vec<u8>;
-    if (encrypted_packet[3] & (1 << 7)) != 0 {
-        decypted_packet = encrypted_packet.to_vec();
-    }
-    else {
-        decypted_packet = super::utils::decrypt_packet(encrypted_packet, shared_secret).await?.to_vec();
-    }
-    
-    let payload_size_bytes = &decypted_packet[1..3];
-    let payload_size = u16::from_le_bytes([payload_size_bytes[0], payload_size_bytes[1]]) as usize;
+    let dilithium_signature = &packet[5 .. 5 + 3293];
+    let ed25519_signature = &packet[5 + 3293 .. 5 + 3293 + 64];
 
-    let dilithium_signature = &decypted_packet[5 .. 5 + 3293];
-    let ed25519_signature = &decypted_packet[5 + 3293 .. 5 + 3293 + 64];
+    let dilithium_public_key_bytes = &packet[5 + 3293 + 64 .. 5 + 3293 + 64 + 1952];
+    let ed25519_public_key = &packet[5 + 3293 + 64 + 1952 .. 5 + 3293 + 64 + 1952 + 32];
 
-    let dilithium_public_key_bytes = &decypted_packet[5 + 3293 + 64 .. 5 + 3293 + 64 + 1952];
-    let ed25519_public_key = &decypted_packet[5 + 3293 + 64 + 1952 .. 5 + 3293 + 64 + 1952 + 32];
-
-    let user_id_bytes = &decypted_packet[5 + 3293 + 64 + 1952 + 32 .. 5 + 3293 + 64 + 1952 + 32 + 32];
+    let user_id_bytes = &packet[5 + 3293 + 64 + 1952 + 32 .. 5 + 3293 + 64 + 1952 + 32 + 32];
     let user_id_hex = hex::encode(user_id_bytes);
 
-    let timestamp_bytes = &decypted_packet[5 + 3293 + 64 + 1952 + 32 + 32 + 16 .. 5 + 3293 + 64 + 1952 + 32 + 32 + 16 + 8];
+    let timestamp_bytes = &packet[5 + 3293 + 64 + 1952 + 32 + 32 + 16 .. 5 + 3293 + 64 + 1952 + 32 + 32 + 16 + 8];
     let timestamp = utils::uint8_array_to_ts(&timestamp_bytes);
 
-    let data_to_sign_bytes = &decypted_packet[5 + 3293 + 64 ..payload_size];
+    let data_to_sign_bytes = &packet[5 + 3293 + 64 ..];
 
     if !check_ts_validity(timestamp) {
         // TODO handle invalid timestamp
@@ -64,12 +51,11 @@ pub async fn forward(
 
     let connection = {
         let connections = CONNECTIONS.read().await;
-        println!("{:?}", &connections);
         connections.get(&user_id_hex).cloned()
     };
     let failed = if let Some(stream) = connection {
         let mut locked_writer = stream.lock().await;
-        if let Err(e) = locked_writer.write_all(&decypted_packet).await {
+        if let Err(e) = locked_writer.write(packet).await {
             println!("[ERROR] Failed to write to socket: {}", e);
             true
         } else {
@@ -86,11 +72,11 @@ pub async fn forward(
         for raw_ip in super::node_assign::find_closest_hashes(&hex::decode(&user_id_hex).unwrap(), 4).await {
             let ip: std::net::IpAddr = raw_ip.parse().expect("Invalid IP address");
             if raw_ip == super::super::PUBLIC_IP.lock().unwrap().to_string() || raw_ip == "127.0.0.1"{
-                save_packet(user_id_hex.clone(), decypted_packet.to_vec()).await;
+                save_packet(user_id_hex.clone(), packet.to_vec()).await;
                 return Ok(());
             }
-            decypted_packet[3] |= 1 << 7;
-            match utils::send_tcp_message(&ip, &decypted_packet).await {
+
+            match utils::send_tcp_message(&ip, &packet).await {
                 Ok(()) => {
                     println!("node is online");
                     break;
@@ -105,21 +91,18 @@ pub async fn forward(
 }
 
 pub async fn handle_connect(
-    encrypted_packet: &[u8],
-    writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
-    shared_secret: &[u8]
+    packet: &[u8]
 ) -> Result<String, String> {
-    let decypted_packet=  super::utils::decrypt_packet(encrypted_packet, shared_secret).await?;
-    let dilithium_signature = &decypted_packet[5 .. 5 + 3293];
-    let ed25519_signature = &decypted_packet[5 + 3293 .. 5 + 3293 + 64];
+    let dilithium_signature = &packet[5 .. 5 + 3293];
+    let ed25519_signature = &packet[5 + 3293 .. 5 + 3293 + 64];
 
-    let dilithium_public_key_bytes = &decypted_packet[5 + 3293 + 64 .. 5 + 3293 + 64 + 1952];
-    let ed25519_public_key = &decypted_packet[5 + 3293 + 64 + 1952 .. 5 + 3293 + 64 + 1952 + 32];
-    let nonce = &decypted_packet[5 + 3293 + 64 + 1952 + 32 .. 5 + 3293 + 64 + 1952 + 32 + 16];
+    let dilithium_public_key_bytes = &packet[5 + 3293 + 64 .. 5 + 3293 + 64 + 1952];
+    let ed25519_public_key = &packet[5 + 3293 + 64 + 1952 .. 5 + 3293 + 64 + 1952 + 32];
+    let nonce = &packet[5 + 3293 + 64 + 1952 + 32 .. 5 + 3293 + 64 + 1952 + 32 + 16];
 
-    let data_to_sign_bytes = &decypted_packet[5 + 3293 + 64 ..];
+    let data_to_sign_bytes = &packet[5 + 3293 + 64 ..];
     
-    let timestamp_bytes = &decypted_packet[5 + 3293 + 64 + 1952 + 32 + 16 .. 5 + 3293 + 64 + 1952 + 32 + 16 + 8];
+    let timestamp_bytes = &packet[5 + 3293 + 64 + 1952 + 32 + 16 .. 5 + 3293 + 64 + 1952 + 32 + 16 + 8];
     let timestamp = utils::uint8_array_to_ts(&timestamp_bytes);
 
     let ed_public_key_array: &[u8; 32] = ed25519_public_key
@@ -148,35 +131,12 @@ pub async fn handle_connect(
 
     let public_id = crypto::sha256_hash(&full_hash_input);
 
-    {
-        let mut conn_map = CONNECTIONS.write().await;
-        conn_map.insert(public_id.clone(), Arc::clone(&writer));
-    }
-    {
-        let user_packets = utils::get_packets_for_user(&public_id).await;
-        match user_packets {
-            Some(packets) => {
-                let mut locked_writer = writer.lock().await;
-
-                for packet in packets {
-                    let _ = locked_writer.write_all(&packet).await;
-                }
-    
-                println!("All packets for user {} have been processed.", public_id);
-                utils::delete_packets_for_user(&public_id).await;
-            }
-            None => {
-                println!("No packets found for user {}", public_id);
-            }
-        }
-    }
     Ok(public_id)
 }
 
 pub async fn handle_node_assignement(
-    buffer: &[u8],
-    writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>
-) -> Result<(), String> {
+    buffer: &[u8]
+) -> Result<Vec<u8>, String> {
     let payload_size_bytes = &buffer[1..3];
     let payload_size = u16::from_le_bytes([payload_size_bytes[0], payload_size_bytes[1]]) as usize;
     let dilithium_signature = &buffer[5 .. 5 + 3293];
@@ -221,14 +181,12 @@ pub async fn handle_node_assignement(
     println!("Time taken to find closest hashes: {} seconds and {} nanoseconds", 
              duration.as_secs(), duration.subsec_nanos());
 
-    let mut buffer = BytesMut::with_capacity(1024);
+    let mut buffer = Vec::new();
     for ip in closest_nodes {
         buffer.extend_from_slice(ip.as_bytes());
         println!("ip: {}", ip);
         buffer.extend_from_slice(" ".as_bytes());
     }
-    let mut locked_writer = writer.lock().await;
-    locked_writer.write_all(&buffer).await.expect("Write failed");
-    
-    Ok(())
+
+    Ok(buffer)
 }

@@ -12,6 +12,7 @@ use bytes::{buf, BufMut, BytesMut};
 use std::fs::OpenOptions;
 
 mod modules;
+use modules::utils;
 
 lazy_static::lazy_static! {
     pub static ref DELAYED_DELIVERY: Arc<Mutex<HashMap<String, Vec<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -22,7 +23,7 @@ lazy_static::lazy_static! {
 }
 
 lazy_static::lazy_static! {
-    pub static ref CONNECTIONS: Arc<RwLock<HashMap<String, Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>>>> = Arc::new(RwLock::new(HashMap::new()));
+    pub static ref CONNECTIONS: Arc<RwLock<HashMap<String, Arc<Mutex<pq_tls::server::PqTlsServer>>>>> = Arc::new(RwLock::new(HashMap::new()));
 }
 
 lazy_static::lazy_static! {
@@ -34,7 +35,7 @@ lazy_static::lazy_static! {
 }
 
 
-
+/* 
 async fn error_terminate_conn(
     user_id: &str, writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>, error: &str
 ) {
@@ -49,7 +50,7 @@ async fn error_terminate_conn(
     }
     notify_user_of_disconnection(writer, error).await;
 }
-
+*/
 
 pub async fn notify_user_of_disconnection(
     writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
@@ -108,14 +109,6 @@ async fn main() -> std::io::Result<()> {
     .create(true)
     .open("sorted_hashes.txt")?;
 
-    let conn = rusqlite::Connection::open("node.db").unwrap();
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS secrets (
-            ip TEXT NOT NULL,
-            shared_secret BLOB NOT NULL
-        )",
-        [],
-    ).unwrap();
     modules::node_assign::read_and_sort_hashes_from_file(&file).await.unwrap();
     let listener = match TcpListener::bind("0.0.0.0:32775").await {
         Ok(l) => l,
@@ -138,6 +131,156 @@ async fn main() -> std::io::Result<()> {
 }
 
 async fn handle_client(socket: tokio::net::TcpStream) {
+
+    let mut raw = pq_tls::server::PqTlsServer::handle_new_client(socket).await.unwrap();
+    let mut video_call_socket: Option<TcpStream> = None;
+    let c = Arc::new(Mutex::new(raw));
+    let mut user_id: String;
+    loop {
+        let packet = {
+            let mut guard = c.lock().await;
+            guard.wait_for_packet().await.unwrap()
+        };
+        println!("packet received");
+        match packet[0] {
+            0 => {
+                println!("Obsolete ss establishement");
+            },
+            1 => {
+                user_id = match modules::handle::handle_connect(
+                    &packet
+                ).await {
+                    Ok(user_id) => user_id,
+                    Err(e) => {
+                        //error_terminate_conn(&user_id, writer.clone(), &e).await;
+                        println!("a connection was cleanely aborted: {}", e);
+                        break
+                    }
+                };
+                {
+                    let mut conn_map = CONNECTIONS.write().await;
+                    conn_map.insert(user_id.clone(), c.clone());
+                }
+                {
+                    let user_packets = utils::get_packets_for_user(&user_id).await;
+                    match user_packets {
+                        Some(packets) => {
+                        
+                            for packet in packets {
+                                let mut guard = c.lock().await;
+                                guard.write(&packet).await.unwrap();
+                                
+                            }
+                        
+                            println!("All packets for user {} have been processed.", user_id);
+                            utils::delete_packets_for_user(&user_id).await;
+                        }
+                        None => {
+                            println!("No packets found for user {}", user_id);
+                        }
+                    }
+                }
+            }
+            2..=4 | 0xC0..=0xCF => {
+                match modules::handle::forward(&packet).await {
+                    Ok(()) => (),
+                    Err(e) => {
+                        //error_terminate_conn(&user_id, writer.clone(), &e).await;
+                        println!("a connection was cleanely aborted: {}", e);
+                        break
+                    }
+                }
+            }
+            10 => {
+                match modules::handle::handle_node_assignement(&packet).await {
+                    Ok(data) => {
+                        let mut guard = c.lock().await;
+                        guard.write(&data).await.unwrap();
+                    },
+                    Err(e) => {
+                        //error_terminate_conn(&user_id, writer.clone(), &e).await;
+                        println!("a connection was cleanely aborted: {}", e);
+                        break
+                    }
+                }
+            }
+            
+            0xF0 => {
+                let dst_user_id_bytes = &packet[5..5 + 32];
+                let call_user = hex::encode(dst_user_id_bytes);
+                
+                let failed = if let Some(stream) = {
+                    let conns = CONNECTIONS.read().await;
+                    conns.get(&call_user).cloned()
+                } {
+                    let mut w = stream.lock().await;
+                    w.write(&packet).await.is_err()
+                } else {
+                    true
+                };
+                if failed {
+                    for raw_ip in modules::node_assign::find_closest_hashes(
+                            &hex::decode(&call_user).unwrap(), 4
+                        ).await
+                    {
+                        if raw_ip != PUBLIC_IP.lock().unwrap().to_string()
+                            && raw_ip != "127.0.0.1"
+                        {
+                            let ip: std::net::IpAddr = raw_ip.parse().unwrap();
+                            match &mut video_call_socket {
+                                Some(socket) => {
+                                    if socket.write_all(&packet).is_ok() {
+                                        println!("Sent packet to existing video call socket: {}", ip);
+                                        break;
+                                    } else {
+                                        println!("Failed writing to existing socket. Dropping it.");
+                                    }
+                                }
+                                None => {
+                                    match TcpStream::connect((ip, 32775)) {
+                                        Ok(mut stream) => {
+                                            println!("Connection established with node: {}", ip);
+                                            if stream.write_all(&packet).is_ok() {
+                                                video_call_socket = Some(stream);
+                                                break;
+                                            } else {
+                                                println!("Failed to write after connecting to {}", ip);
+                                            }
+                                        }
+                                        Err(err) => {
+                                            println!("Failed to connect to {}: {}", ip, err);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+/*
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     let mut buffer = BytesMut::with_capacity(1024);
     let (mut read_half, write_half) = socket.into_split();
     let writer = Arc::new(Mutex::new(write_half));
@@ -240,7 +383,7 @@ async fn handle_client(socket: tokio::net::TcpStream) {
                         0xF0 => {
                             let dst_user_id_bytes = &packet[5..5+32];
                             let call_user = hex::encode(dst_user_id_bytes);
-
+                            
                             let failed = if let Some(stream) = {
                                 let conns = CONNECTIONS.read().await;
                                 conns.get(&call_user).cloned()
@@ -294,7 +437,9 @@ async fn handle_client(socket: tokio::net::TcpStream) {
                         }
                         _ => {}
                     }
+                    
                 }
+                
             }
             Err(e) => {
                 eprintln!("[ERROR] Failed to read from socket: {}", e);
@@ -302,4 +447,4 @@ async fn handle_client(socket: tokio::net::TcpStream) {
             }
         }
     }
-}
+} */

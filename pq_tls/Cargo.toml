@@ -1,0 +1,27 @@
+[package]
+name = "pq_tls"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rand = "0.8"
+tokio = { version = "1.45.1", features = ["net", "io-util", "macros", "rt-multi-thread"] }
+kyber1024 = { path = "./kyber1024", features = ["kyber1024", "zeroize"]}
+kyber768 = { path = "./kyber768", features = ["kyber768", "zeroize"]}
+kyber512 = { path = "./kyber512", features = ["kyber512", "zeroize"]}
+pqc_dilithium2 = { path = "./dilithium2", features = ["mode2", "random_signing", "aes"] }
+pqc_dilithium3 = { path = "./dilithium3", features = ["mode3", "random_signing", "aes"] }
+pqc_dilithium5 = { path = "./dilithium5", features = ["mode5", "random_signing", "aes"] }
+hkdf = "0.12"            # Or latest
+sha2 = "0.10"   
+ed25519-dalek = "2.1.1"
+x25519-dalek = "2.0.1"
+frodo-kem = "0.0.1"
+chacha20 = "0.9"
+cipher = "0.4"
+
+sqlx = { version = "0.8.3", features = ["sqlite", "runtime-tokio", "chrono"] }
+chrono = "0.4.41"
+blake3 = "1.8.2"
+bincode = "2.0.1"
+serde = "1.0.219"
