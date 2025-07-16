@@ -1,7 +1,7 @@
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 use std::error::Error;
-use std::path::PathBuf;
+
 use ed25519_dalek::Signature;
 use ed25519_dalek::VerifyingKey;
 
@@ -75,7 +75,7 @@ impl PqTlsServer {
         let c_ss = settings.c_aka_keys.decapsulate(c_pk_client);
 
         let ss = crypto::derive_hybrid_key(client_random, &server_random, &pq_ss, &c_ss);
-        println!("ss serv: {:?}", ss);
+
         let ss_array: [u8; 32] = ss.try_into().expect("slice with incorrect length");
         Ok(
             Self { 
@@ -89,18 +89,8 @@ impl PqTlsServer {
 
 
     pub async fn wait_for_packet(&mut self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-
-
-
         loop {
-
             while self.buffer.len() >= 4 {
-
-                println!("Buffer size: {}", self.buffer.len());
-
-                // Packet size is stored in bytes 1, 2, 3 (little endian?), size includes header?
-
-                // Assuming size includes the 4 header bytes. Adjust if not.
 
                 let size = (self.buffer[1] as usize)
 
@@ -108,63 +98,27 @@ impl PqTlsServer {
 
                     | ((self.buffer[3] as usize) << 16);
 
-
-
                 if self.buffer.len() < size {
-
-                    // Not enough data for full packet yet
-
                     break;
 
                 }
-
-
-
-                // Extract full packet bytes
-
                 let packet = self.buffer[..size].to_vec();
-
-
-
-                // Remove packet bytes from buffer
-
                 self.buffer.drain(0..size);
-
-
-
-                // Decrypt and return the packet
 
                 let dec_packet = crypto::decrypt_packet(&packet, &self.ss);
 
-
-
                 return Ok(dec_packet);
-
-                // If you want to process all packets in buffer before returning, you'd loop here,
-
-                // but since the function returns one packet at a time, returning here is correct.
-
             }
-
-
-
-            // If no full packet yet, read more data from the stream
 
             let mut chunk = [0u8; 1024];
 
             let n = match self.reader.read(&mut chunk).await {
 
                 Ok(0) => return Err("Connection terminated".into()),
-
                 Ok(n) => n,
-
                 Err(e) => return Err(format!("Error reading from stream: {}", e).into()),
 
             };
-
-            println!("Read {} bytes from stream", n);
-
-            // Append new data to buffer and try again
 
             self.buffer.extend_from_slice(&chunk[..n]);
 
@@ -224,6 +178,7 @@ pub async fn server_start() -> Result<(), Box<dyn Error>> {
                     return;
                 }
             };
+
             loop {
                 let packet = match res_s.wait_for_packet().await {
                     Ok(packet) => packet,

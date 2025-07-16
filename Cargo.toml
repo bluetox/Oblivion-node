@@ -17,5 +17,4 @@ bytes = "1.0"
 ed25519-dalek = "2.1.1"
 rand = "0.8"
 aes-gcm = "0.10.0"
-safe_pqc_kyber = { path = "./pqc_kyber_improved", features = ["kyber1024", "zeroize"]}
 pq_tls = { version = "0.1.0", path = "pq_tls" }

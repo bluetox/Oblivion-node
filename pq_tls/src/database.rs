@@ -1,8 +1,8 @@
-use std::path::{Path, PathBuf};
-use sqlx::{sqlite::{SqlitePoolOptions, SqliteConnectOptions}, migrate::MigrateDatabase ,Sqlite, Pool};
+use std::path::Path;
+use sqlx::{sqlite::SqlitePoolOptions, migrate::MigrateDatabase ,Sqlite, Pool};
 use sqlx::migrate::Migrator;
 use sqlx::FromRow;
-use chrono::{DateTime, NaiveDateTime};
+use chrono::DateTime;
 use chrono::Utc;
 
 #[derive(Debug, FromRow)]
