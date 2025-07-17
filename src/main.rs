@@ -141,7 +141,7 @@ async fn handle_client(socket: tokio::net::TcpStream) {
             let mut guard = c.lock().await;
             guard.wait_for_packet().await.unwrap()
         };
-        println!("packet received");
+
         match packet[0] {
             0 => {
                 println!("Obsolete ss establishement");
@@ -206,6 +206,8 @@ async fn handle_client(socket: tokio::net::TcpStream) {
             }
             
             0xF0 => {
+                println!("Received a video frame");
+                /* 
                 let dst_user_id_bytes = &packet[5..5 + 32];
                 let call_user = hex::encode(dst_user_id_bytes);
                 
@@ -257,6 +259,7 @@ async fn handle_client(socket: tokio::net::TcpStream) {
                         break;
                     }
                 }
+                */
             }
             _ => {}
         }

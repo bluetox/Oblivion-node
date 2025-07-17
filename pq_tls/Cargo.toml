@@ -20,3 +20,12 @@ blake3 = "1.8.2"
 bincode = "2.0.1"
 serde = "1.0.219"
 pqcrypto = "0.18.1"
+
+
+[profile.dev]
+opt-level = 0          # No optimization = faster compile
+debug = true
+split-debuginfo = 'unpacked'
+incremental = true     # Enable incremental builds
+codegen-units = 256    # Max parallelism = fastest build
+overflow-checks = false
